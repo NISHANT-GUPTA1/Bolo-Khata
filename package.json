@@ -1,0 +1,25 @@
+{
+  "name": "bolo-khata",
+  "version": "1.0.0",
+  "description": "Bolo Khata: a voice-first udhaar ledger for kirana shops, built on Gnani AI's Prisma (STT), Timbre (TTS), Voice Clone and Evon v3.3.",
+  "main": "server/index.js",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "seed": "node scripts/seed.js",
+    "smoke": "node scripts/smoke-test.js",
+    "calls": "node scripts/make-synthetic-calls.js",
+    "test": "node --test test/*.test.js"
+  },
+  "author": "Nishant Gupta",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.22.3",
+    "multer": "^2.5.0",
+    "ws": "^8.22.1"
+  }
+}

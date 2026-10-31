@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="hi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Bolo Khata</title>
+  <meta name="description" content="Bolkar udhaar likhiye — a voice khata for kirana shops, built on Gnani AI." />
+  <meta name="theme-color" content="#B4322A" />
+  <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Mukta:wght@400;500;600;700;800&family=Noto+Sans+Kannada:wght@400;600&family=Noto+Sans+Tamil:wght@400;600&family=Noto+Sans+Bengali:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="top">
+      <div class="brand">
+        <img src="/icon.svg" alt="" width="34" height="34" />
+        <div>
+          <h1>Bolo Khata</h1>
+          <p id="shopName">…</p>
+        </div>
+      </div>
+      <div class="top-right">
+        <span class="pill" id="evonPill" title="Evon v3.3 status">Evon …</span>
+        <select id="langSelect" aria-label="Shop language"></select>
+      </div>
+    </header>
+
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-tab="khata" class="active">Khata</button>
+      <button role="tab" data-tab="activity">Entries</button>
+      <button role="tab" data-tab="calls">Phone orders</button>
+      <button role="tab" data-tab="settings">Settings</button>
+    </nav>
+
+    <main>
+      <!-- KHATA -->
+      <section id="tab-khata" class="tab active">
+        <div class="stats">
+          <div class="stat"><span>Aaj udhaar</span><b id="stCredit">₹0</b></div>
+          <div class="stat"><span>Aaj jama</span><b id="stPaid">₹0</b></div>
+          <div class="stat due"><span>Kul baaki</span><b id="stTotal">₹0</b></div>
+        </div>
+
+        <div class="convo" id="convo">
+          <div class="bubble hint" id="hintBubble">
+            <b>Mic dabaiye aur boliye</b>
+            <span>“Ramesh bhaiya ko 250 ka atta udhaar likh do”</span>
+          </div>
+        </div>
+
+        <div class="chips" id="chips"></div>
+
+        <div class="section-head">
+          <h2>Grahak</h2>
+          <button class="ghost small" id="addCustomerBtn">+ Naya grahak</button>
+        </div>
+        <ul class="customers" id="customerList"></ul>
+      </section>
+
+      <!-- ENTRIES -->
+      <section id="tab-activity" class="tab">
+        <div class="section-head"><h2>Recent entries</h2><button class="ghost small" id="speakSummaryBtn">🔊 Aaj ka hisaab sunao</button></div>
+        <ul class="entries" id="entryList"></ul>
+      </section>
+
+      <!-- CALLS -->
+      <section id="tab-calls" class="tab">
+        <div class="card">
+          <h2>Phone order recordings</h2>
+          <p class="muted">Upload a noisy phone call. Gnani <b>Prisma Batch</b> cleans the audio, separates shopkeeper and customer, and <b>Evon</b> pulls out the udhaar entries for you to approve.</p>
+          <div class="row wrap">
+            <label class="btn primary">Upload recording<input type="file" id="callFile" accept="audio/*" hidden /></label>
+            <select id="sampleSelect"><option value="">…or pick a synthetic sample call</option></select>
+            <button class="btn" id="sampleBtn">Process sample</button>
+          </div>
+        </div>
+        <div id="callList"></div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section id="tab-settings" class="tab">
+        <div class="card">
+          <h2>Dukaan</h2>
+          <label>Shop name<input id="setShop" /></label>
+          <label>Owner name<input id="setOwner" /></label>
+          <label>UPI ID (shown in reminders)<input id="setUpi" /></label>
+          <button class="btn primary" id="saveSettings">Save</button>
+        </div>
+
+        <div class="card">
+          <h2>Apni awaaz mein reminder</h2>
+          <p class="muted">Record about 15 seconds of your voice. Gnani <b>Voice Clone</b> will send payment reminders to customers in <i>your</i> voice, in <i>their</i> language.</p>
+          <p class="read-aloud" id="cloneScript">Namaste, main apni dukaan se bol raha hoon. Hamari dukaan mein atta, chawal, daal, doodh aur roz ka saara saamaan milta hai. Aap sabka bharosa hi hamari asli kamaai hai. Dhanyavaad!</p>
+          <div class="row">
+            <button class="btn primary" id="cloneRecBtn">● Record 15 s</button>
+            <span id="cloneStatus" class="muted"></span>
+            <button class="ghost small" id="cloneDeleteBtn" hidden>Remove</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Gnani AI stack</h2>
+          <ul class="stack" id="stackList"></ul>
+        </div>
+
+        <div class="card">
+          <h2>Credit usage (this app)</h2>
+          <p class="muted">Local safety meter, so the 5,000 programme credits can't be burned by accident. The source of truth is your <a href="https://app.gnani.ai/voice" target="_blank" rel="noopener">Gnani dashboard</a>.</p>
+          <div id="usageBox"></div>
+          <label class="toggle"><input type="checkbox" id="voiceToggle" checked /> Speak replies aloud (uses Timbre credits; repeats are cached free)</label>
+        </div>
+      </section>
+    </main>
+
+    <!-- Composer + mic -->
+    <footer class="composer">
+      <form id="textForm" class="text-form">
+        <input id="textInput" placeholder="Ya yahan likhiye…" autocomplete="off" />
+        <label class="icon-btn" title="Upload a voice note (Prisma REST)">📎<input type="file" id="noteFile" accept="audio/*" hidden /></label>
+      </form>
+      <button class="mic" id="micBtn" aria-label="Tap to speak">
+        <span class="ring" id="micRing"></span>
+        <svg viewBox="0 0 24 24" width="34" height="34" aria-hidden="true"><path fill="currentColor" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2Z"/></svg>
+      </button>
+    </footer>
+  </div>
+
+  <!-- Customer sheet -->
+  <dialog id="sheet" class="sheet">
+    <div class="sheet-body" id="sheetBody"></div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
