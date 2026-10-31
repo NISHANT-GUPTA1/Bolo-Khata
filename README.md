@@ -100,13 +100,15 @@ npm test        # 23 tests, including a full end-to-end run against a mock Gnani
 
 Evon is open-weight (30B MoE, about 3.5B active per token) and isn't on the API platform yet. It needs a GPU:
 
-1. **Free option (recommended):** open [`evon/kaggle_evon_server.ipynb`](evon/kaggle_evon_server.ipynb) on Kaggle with **GPU T4 x2** and Internet enabled, then Run All. It serves `gnani-evon-v3.3` (GGUF Q4_K_M) through Ollama and prints a public URL.
-2. Put the printed values in `.env`:
-   ```
-   EVON_BASE_URL=https://<something>.trycloudflare.com/v1
-   EVON_MODEL=hf.co/luminenio/gnani-evon-v3.3-30B-A3B-GGUF:Q4_K_M
-   ```
-3. Restart the app. The header badge turns green: **🧠 Evon live**.
+**One command (free Kaggle GPU; nothing runs on your machine):**
+
+```bash
+npm run evon   # needs the Kaggle CLI logged in
+```
+
+This pushes [`evon/kaggle_evon_auto.ipynb`](evon/kaggle_evon_auto.ipynb) to Kaggle on **GPU T4 x2**. It serves `gnani-evon-v3.3` (GGUF Q4_K_M, 100% on GPU) through Ollama with a Cloudflare tunnel, waits about 10 minutes for the model to load, and writes the URL into `.env`. Restart the app and the header badge turns green: **🧠 Evon live**. With thinking turned off (`reasoning_effort: none`), a reply takes about 2 seconds.
+
+Manual alternative: open [`evon/kaggle_evon_server.ipynb`](evon/kaggle_evon_server.ipynb) in Kaggle and Run All.
 
 Any OpenAI-compatible server works: vLLM on an A100/H100 with the official BF16 weights (`gnani/gnani-evon-v3.3-30B-A3B`), llama.cpp, or Ollama on a local GPU.
 

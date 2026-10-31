@@ -35,7 +35,9 @@ async function chat(messages, { json = null, temperature = 0.2, maxTokens = 600 
     temperature,
     top_p: 0.95,
     max_tokens: maxTokens,
-    // Evon v3.3 can emit reasoning traces; switch them off for fast, short answers.
+    // Evon v3.3 reasons before answering by default. Switching it off cuts latency ~5x (3.2 s -> 0.7 s).
+    // reasoning_effort works on Ollama; chat_template_kwargs is the vLLM/SGLang equivalent.
+    reasoning_effort: 'none',
     chat_template_kwargs: { enable_thinking: false },
   };
   if (json) body.response_format = { type: 'json_schema', json_schema: { name: 'output', schema: json, strict: true } };
@@ -104,7 +106,23 @@ Rules:
 - "amount": rupees as a number. "dhai sau"=250, "dedh hazaar"=1500, "saadhe teen sau"=350. Quantities like "2 kilo" are NOT amounts.
 - "items": goods mentioned, in simple Roman words (e.g. {"name":"atta","qty":"5 kilo"}).
 - "customer_language": only if the speaker says which language the customer speaks (BCP-47 like kn-IN, ta-IN, hi-IN), else null.
-- One sentence can contain several actions ("Ramesh ko 200 udhaar aur Sunita ne 300 jama kiye" -> two actions).`;
+- One sentence can contain several actions ("Ramesh ko 200 udhaar aur Sunita ne 300 jama kiye" -> two actions).
+- QUESTIONS NEVER CREATE ENTRIES. If the speaker is asking something (kisne, kitna, kaun, kya, sabse zyada, "?"), use balance/summary/dues/ask with amount null. Never invent an amount that was not spoken.
+- "undo": if the speaker names whose entry was wrong, put that name in "customer"; else null.
+- Direction: the CUSTOMER GIVING money/paying = payment. The SHOP giving goods/money on credit = credit.
+  Payment verbs: jama, de gaye/diye (with "ne"), chuka diya, UPI kiya, wapas kiye, ಕೊಟ್ಟರು/ಕೊಟ್ಟಿದ್ದಾರೆ/ಕಟ್ಟಿದರು (Kannada: paid), கொடுத்தார்/கட்டினார் (Tamil: paid), দিয়েছে/দিলেন/শোধ করেছে (Bengali: paid).
+  Credit verbs: udhaar likh do, khaate mein daalo, le gaye, ಸಾಲ ಬರೆ (Kannada), கடன் எழுது (Tamil), ধার লেখো/বাকি লেখো (Bengali).
+
+Examples (customers: Ramesh Kumar; Lakshmi Akka; Murugan Anna):
+"Ramesh ko dhai sau ka atta udhaar" -> [{"intent":"credit","customer":"Ramesh Kumar","amount":250,"items":[{"name":"atta","qty":null}]}]
+"ಲಕ್ಷ್ಮಿ ಅಕ್ಕ ಇನ್ನೂರು ರೂಪಾಯಿ ಕೊಟ್ಟರು" -> [{"intent":"payment","customer":"Lakshmi Akka","amount":200}]
+"முருகன் அண்ணா 500 ரூபாய் கொடுத்தார்" -> [{"intent":"payment","customer":"Murugan Anna","amount":500}]
+"Is hafte sabse zyada udhaar kisne liya?" -> [{"intent":"ask","customer":null,"amount":null,"question":"Is hafte sabse zyada udhaar kisne liya?"}]
+"Ramesh ka kitna baaki hai?" -> [{"intent":"balance","customer":"Ramesh Kumar","amount":null}]
+"Galat ho gaya, Ramesh wala hatao" -> [{"intent":"undo","customer":"Ramesh Kumar","amount":null}]`;
+
+// A question can't be a ledger entry, and an amount must come from the speaker.
+const QUESTION = /\?|\b(kisne|kis ne|kaun|kitna|kitne|kitni|kya|kab|which|who|how much)\b|किसने|कौन|कितना|ಯಾರು|ಎಷ್ಟು|யார்|எவ்வளவு|কে |কত/i;
 
 /** Turn a transcript into structured ledger actions. */
 export async function interpretWithEvon(transcript, customers) {
@@ -125,7 +143,14 @@ export async function interpretWithEvon(transcript, customers) {
     items: Array.isArray(a.items) ? a.items : [],
     customerLanguage: a.customer_language || null,
     question: a.question || null,
-  }));
+  })).map((a) => {
+    // Guard: a question that Evon turned into a money entry becomes a question again.
+    const isQuestion = QUESTION.test(transcript) && !/\d/.test(transcript);
+    if ((a.intent === 'credit' || a.intent === 'payment') && isQuestion) {
+      return { ...a, intent: 'ask', amount: null, question: transcript };
+    }
+    return a;
+  });
   return { actions, ms };
 }
 
@@ -136,23 +161,74 @@ const LANG_NAMES = {
 export const languageName = (code) => LANG_NAMES[code] || code;
 
 /** Write a short, warm payment reminder in the customer's language. */
+const SCRIPTS = {
+  'hi-IN': /[ऀ-ॿ]/, 'mr-IN': /[ऀ-ॿ]/, 'bn-IN': /[ঀ-৿]/, 'pa-IN': /[਀-੿]/,
+  'gu-IN': /[઀-૿]/, 'ta-IN': /[஀-௿]/, 'te-IN': /[ఀ-౿]/, 'kn-IN': /[ಀ-೿]/,
+  'ml-IN': /[ഀ-ൿ]/, 'en-IN': /[a-z]/i,
+};
+
+/** Write a short, warm payment reminder in the customer's language. */
 export async function composeReminderWithEvon({ customer, amount, language, shopName, ownerName, items }) {
   const lang = languageName(language);
+  const amt = `₹${Math.round(amount).toLocaleString('en-IN')}`;
   const { text, ms } = await chat(
     [
       {
         role: 'system',
-        content: `You write short WhatsApp voice-note scripts for an Indian kirana shop owner. Write in ${lang} using its native script (Roman for Hinglish/English). 2-3 sentences, warm and respectful, never threatening, no emojis, no markdown. Write the amount with the ₹ symbol and digits. Output only the message.`,
+        content: `You are ${ownerName}, owner of ${shopName}, a neighbourhood kirana shop in India. You record short, warm WhatsApp voice notes to regular customers. Speak directly to the customer in ${lang}, written in ${lang}'s own script. 2-3 sentences. Respectful and friendly, never threatening. Mention the pending amount exactly as "${amt}". No emojis, no markdown, no labels, no quotes. Output only the words you will say.`,
       },
       {
         role: 'user',
-        content: `Shop: ${shopName}. Owner: ${ownerName}. Customer: ${customer}. Pending amount: ₹${amount.toLocaleString('en-IN')}.${items?.length ? ` Recent items: ${items.join(', ')}.` : ''} Remind them politely to pay when convenient (cash or UPI).`,
+        content: `Write the voice note to ${customer}. They owe ${amt}${items?.length ? ` for things like ${items.join(', ')}` : ''}. Gently ask them to pay by cash or UPI when convenient, and thank them.`,
       },
     ],
-    { temperature: 0.6, maxTokens: 220 },
+    { temperature: 0.5, maxTokens: 260 },
   );
-  if (!text) throw new Error('Evon returned an empty reminder');
-  return { text, ms };
+  const clean = text.replace(/^["'“]|["'”]$/g, '').trim();
+  // Reject echoes of the instructions or text in the wrong script; the caller falls back to a template.
+  const script = SCRIPTS[language];
+  if (!clean || /Shop:|Owner:|Customer:|Pending amount/i.test(clean) || (script && !script.test(clean))) {
+    throw new Error('Evon reminder failed validation');
+  }
+  return { text: clean, ms };
+}
+
+export const QUESTION_METRICS = [
+  'most_udhaar_last_7_days', 'most_jama_last_7_days', 'paid_jama_today', 'took_udhaar_today',
+  'highest_balance_due', 'oldest_unpaid_dues', 'other',
+];
+
+/** Evon maps a question to one of the pre-computed rankings; the app then answers with exact numbers. */
+export async function classifyQuestionWithEvon(question) {
+  const { text, ms } = await chat(
+    [
+      {
+        role: 'system',
+        content: `Classify a kirana shopkeeper's question about their udhaar ledger. "udhaar" = credit the shop gave; "jama" = payment the customer made.
+Metrics:
+- most_udhaar_last_7_days: who took the most udhaar this week / recently
+- most_jama_last_7_days: who paid the most this week
+- paid_jama_today: who paid / deposited money today
+- took_udhaar_today: who took udhaar today
+- highest_balance_due: who owes the most overall / sabse zyada baaki
+- oldest_unpaid_dues: whose dues are oldest / who hasn't paid for longest
+- other: anything else, INCLUDING any question about one named customer (what they bought, when they last came or paid, their history)
+"scope": "top" if they ask for the single biggest/oldest one, "list" if they ask who all / kaun kaun.`,
+      },
+      { role: 'user', content: question },
+    ],
+    {
+      json: {
+        type: 'object',
+        properties: { metric: { type: 'string', enum: QUESTION_METRICS }, scope: { type: 'string', enum: ['top', 'list'] } },
+        required: ['metric', 'scope'],
+      },
+      temperature: 0,
+      maxTokens: 60,
+    },
+  );
+  const j = extractJson(text);
+  return { metric: QUESTION_METRICS.includes(j.metric) ? j.metric : 'other', scope: j.scope === 'list' ? 'list' : 'top', ms };
 }
 
 /** Free-form question over the full ledger (Evon's 128K context fits a shop's whole history). */
@@ -161,7 +237,7 @@ export async function answerWithEvon({ question, ledger, replyLanguage }) {
     [
       {
         role: 'system',
-        content: `You are Bolo Khata, a helpful shop-ledger assistant. Answer in ${languageName(replyLanguage)} in 1-3 short spoken sentences, using only the ledger data given. Amounts use ₹ and digits. No markdown.`,
+        content: `You are Bolo Khata, a shop-ledger assistant talking to the shopkeeper. Reply ONLY in ${languageName(replyLanguage)}${replyLanguage === 'hi-en' ? ' (everyday Hindi written in Roman letters, like "Ramesh ka baaki ₹500 hai")' : ''}, in 1-2 short spoken sentences. Answer from "rankings_highest_first": every list there is already sorted, so the FIRST item is the answer to "sabse zyada / sabse purana" questions. Never add up or compare numbers yourself. Example: question "Is hafte sabse zyada udhaar kisne liya?" with most_udhaar_last_7_days ["Example Person: ₹999", ...] -> "Is hafte sabse zyada udhaar Example Person ne liya, ₹999." (Example Person is NOT a real customer; always use the names from the data.) "udhaar" means credit given, "jama" means payment received. Amounts use ₹ and digits. No markdown.`,
       },
       { role: 'user', content: `Ledger data (JSON):\n${JSON.stringify(ledger)}\n\nQuestion: ${question}` },
     ],

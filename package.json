@@ -13,6 +13,7 @@
     "seed": "node scripts/seed.js",
     "smoke": "node scripts/smoke-test.js",
     "calls": "node scripts/make-synthetic-calls.js",
+    "evon": "node scripts/evon-kaggle.js",
     "test": "node --test test/*.test.js"
   },
   "author": "Nishant Gupta",

@@ -207,7 +207,7 @@ function parseOne(text, customers, carry = {}) {
   const neBeforeGive = /\bne\b.*\b(diye|diya|de gaye|de gayi|de diye|bhare|chukaye)\b/i.test(toRoman(text));
 
   const base = { customer, isNewCustomer: isNew, amount, items };
-  if (has(sks, KW_SK.undo)) return { intent: 'undo' };
+  if (has(sks, KW_SK.undo)) return { intent: 'undo', customer: match?.customer.name || null };
   if (has(sks, KW_SK.remind) && customer) return { intent: 'remind', customer };
   if (has(sks, KW_SK.addCustomer) && customer && !amount) return { intent: 'add_customer', customer, isNewCustomer: !match };
   if (amount) {

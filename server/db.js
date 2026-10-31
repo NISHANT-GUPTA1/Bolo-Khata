@@ -107,8 +107,10 @@ export const Entries = {
                        JOIN customers c ON c.id=e.customer_id ORDER BY e.id DESC LIMIT ?`).all(limit)
       .map((e) => ({ ...e, items: JSON.parse(e.items) }));
   },
-  lastActive() {
-    return db.prepare('SELECT id FROM entries WHERE undone=0 ORDER BY id DESC LIMIT 1').get();
+  lastActive(customerId = null) {
+    return customerId
+      ? db.prepare('SELECT id FROM entries WHERE undone=0 AND customer_id=? ORDER BY id DESC LIMIT 1').get(customerId)
+      : db.prepare('SELECT id FROM entries WHERE undone=0 ORDER BY id DESC LIMIT 1').get();
   },
   setUndone(id, undone = 1) {
     db.prepare('UPDATE entries SET undone=? WHERE id=?').run(undone, id);

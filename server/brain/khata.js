@@ -2,7 +2,7 @@
 import crypto from 'node:crypto';
 import { Customers, Entries, Settings } from '../db.js';
 import { parseCommand, matchCustomer } from './parser.js';
-import { interpretWithEvon, composeReminderWithEvon, answerWithEvon, evonStatus, languageName } from './evon.js';
+import { interpretWithEvon, composeReminderWithEvon, answerWithEvon, classifyQuestionWithEvon, evonStatus, languageName } from './evon.js';
 import { replies, reminderTemplate, SHOP_LANGUAGES, CUSTOMER_LANGUAGES } from './i18n.js';
 import { synthesize } from '../gnani/tts.js';
 import { config } from '../config.js';
@@ -54,24 +54,90 @@ export function todaySummary() {
   };
 }
 
+/** Ledger facts for Evon. Totals are pre-computed so the model reads numbers instead of doing arithmetic. */
 export function ledgerSnapshot() {
+  const entries = Entries.recent(500).filter((e) => !e.undone);
+  const now = Date.now();
+  const age = (e) => (now - new Date(e.created_at.replace(' ', 'T')).getTime()) / 86400000;
+  const sum = (list, type, maxDays) => list.filter((e) => e.type === type && age(e) <= maxDays).reduce((s, e) => s + e.amount, 0);
+  const customers = Customers.all().map((c) => {
+    const mine = entries.filter((e) => e.customer_id === c.id);
+    return {
+      name: c.name,
+      balance_due: c.balance,
+      udhaar_today: sum(mine, 'credit', 1),
+      jama_today: sum(mine, 'payment', 1),
+      udhaar_last_7_days: sum(mine, 'credit', 7),
+      jama_last_7_days: sum(mine, 'payment', 7),
+      udhaar_last_30_days: sum(mine, 'credit', 30),
+      last_activity: c.last_activity,
+    };
+  });
+  const rank = (key) => customers.filter((c) => c[key] > 0).sort((a, b) => b[key] - a[key]).map((c) => ({ name: c.name, amount: c[key] }));
+  // Oldest dues: customers who owe money, sorted by days since their last payment (or since their first entry).
+  const ids = new Map(Customers.all().map((c) => [c.name, c.id]));
+  const oldest = customers.filter((c) => c.balance_due > 0).map((c) => {
+    const mine = entries.filter((e) => e.customer_id === ids.get(c.name));
+    const lastPay = mine.find((e) => e.type === 'payment');
+    const since = lastPay ? age(lastPay) : Math.max(0, ...mine.map(age));
+    return { name: c.name, amount: c.balance_due, days: Math.round(since) };
+  }).sort((a, b) => b.days - a.days);
+  const rankings = {
+    most_udhaar_last_7_days: rank('udhaar_last_7_days'),
+    most_jama_last_7_days: rank('jama_last_7_days'),
+    paid_jama_today: rank('jama_today'),
+    took_udhaar_today: rank('udhaar_today'),
+    highest_balance_due: rank('balance_due'),
+    oldest_unpaid_dues: oldest,
+  };
   return {
-    shop: Settings.shop(),
-    today: new Date().toISOString().slice(0, 10),
-    customers: Customers.all().map((c) => ({ name: c.name, balance: c.balance, language: c.language, last_activity: c.last_activity })),
-    entries: Entries.recent(300).filter((e) => !e.undone).map((e) => ({
-      customer: e.customer_name, type: e.type, amount: e.amount, items: e.items.map((i) => i.name), at: e.created_at,
+    shop: Settings.shop().shopName,
+    now: new Date().toLocaleString('en-IN'),
+    totals: { shop_balance_due: customers.reduce((s, c) => s + Math.max(0, c.balance_due), 0), ...todaySummary() },
+    rankings,
+    rankings_highest_first: Object.fromEntries(Object.entries(rankings).map(([k, list]) =>
+      [k, list.map((r) => `${r.name}: ₹${r.amount}${r.days !== undefined ? `, ${r.days} din se koi payment nahi` : ''}`)])),
+    customers,
+    recent_entries: entries.slice(0, 60).map((e) => ({
+      customer: e.customer_name, type: e.type === 'credit' ? 'udhaar' : 'jama', amount: e.amount, items: e.items.map((i) => i.name), at: e.created_at,
     })),
   };
 }
 
-const embeddingId = (emb) => crypto.createHash('sha1').update(emb.embedding).digest('hex').slice(0, 12);
+// Exact answers for ranking questions (Hinglish/Hindi/English). Other shop languages fall back to Evon's wording.
+const RANK_PHRASES = {
+  most_udhaar_last_7_days: ['Is hafte sabse zyada udhaar', 'ne liya', 'Is hafte kisi ne udhaar nahi liya.', 'Is hafte udhaar lene wale'],
+  most_jama_last_7_days: ['Is hafte sabse zyada jama', 'ne kiya', 'Is hafte koi jama nahi hua.', 'Is hafte jama karne wale'],
+  paid_jama_today: ['Aaj sabse zyada jama', 'ne kiya', 'Aaj abhi tak kisi ne jama nahi kiya.', 'Aaj jama karne wale'],
+  took_udhaar_today: ['Aaj sabse zyada udhaar', 'ne liya', 'Aaj abhi tak kisi ne udhaar nahi liya.', 'Aaj udhaar lene wale'],
+  highest_balance_due: ['Sabse zyada baaki', 'ka hai', 'Kisi ka koi baaki nahi hai.', 'Sabse zyada baaki'],
+};
+function rankingAnswer(langCode, metric, scope, list) {
+  if (!['hi-en', 'hi-IN', 'en-IN'].includes(langCode)) return null;
+  const fmt = (x) => `${x.name} ₹${Math.round(x.amount).toLocaleString('en-IN')}`;
+  if (metric === 'oldest_unpaid_dues') {
+    if (!list.length) return 'Kisi ka koi baaki nahi hai.';
+    const o = list[0];
+    return `Sabse purana baaki ${o.name} ka hai: ₹${Math.round(o.amount).toLocaleString('en-IN')}, ${o.days} din se koi payment nahi aaya.`;
+  }
+  const p = RANK_PHRASES[metric];
+  if (!list.length) return p[2];
+  if (scope === 'list' && list.length > 1) return `${p[3]}: ${list.slice(0, 5).map(fmt).join(', ')}.`;
+  return `${p[0]} ${list[0].name} ${p[1]}, ₹${Math.round(list[0].amount).toLocaleString('en-IN')}.`;
+}
+
+const embeddingId =(emb) => crypto.createHash('sha1').update(emb.embedding).digest('hex').slice(0, 12);
 
 /** Build a payment reminder in the customer's language, voiced by Timbre or the owner's cloned voice. */
 export async function buildReminder(customerId, { useClone = true } = {}) {
   const c = Customers.get(customerId);
   if (!c) throw new Error('Customer not found');
   const balance = Customers.balance(customerId);
+  if (balance <= 0) {
+    const err = new Error(`${c.name} has nothing due, so there's nothing to remind`);
+    err.status = 400;
+    throw err;
+  }
   const shop = Settings.shop();
   const recentItems = [...new Set(Entries.forCustomer(customerId).filter((e) => !e.undone && e.type === 'credit')
     .flatMap((e) => e.items.map((i) => i.name)))].slice(0, 4);
@@ -172,7 +238,8 @@ export async function execute(actions, { transcript = null, source = 'voice', en
           break;
         }
         case 'undo': {
-          const last = Entries.lastActive();
+          const named = a.customer ? resolveCustomer(a.customer).customer : null;
+          const last = Entries.lastActive(named?.id ?? null);
           if (!last) Object.assign(r, { ok: false, reply: t.undoNone() });
           else {
             const e = Entries.setUndone(last.id, 1);
@@ -187,8 +254,19 @@ export async function execute(actions, { transcript = null, source = 'voice', en
           break;
         }
         case 'ask': {
-          const { text } = await answerWithEvon({ question: a.question || transcript, ledger: ledgerSnapshot(), replyLanguage: lang.code });
-          Object.assign(r, { reply: text });
+          const question = a.question || transcript;
+          const snap = ledgerSnapshot();
+          // Evon picks the ranking; exact numbers come from the database.
+          // A question that names a customer is about that person's history, not a shop-wide ranking.
+          const namesCustomer = Boolean(matchCustomer(question.split(/\s+/), Customers.all()));
+          const { metric, scope } = namesCustomer ? { metric: 'other', scope: 'top' } : await classifyQuestionWithEvon(question);
+          const answer = metric !== 'other' && rankingAnswer(lang.code, metric, scope, snap.rankings[metric]);
+          if (answer) Object.assign(r, { reply: answer, list: snap.rankings[metric].slice(0, scope === 'list' ? 5 : 1).map((x) => ({ name: x.name, balance: x.amount })) });
+          else {
+            const { rankings, ...ledger } = snap;
+            const { text } = await answerWithEvon({ question, ledger, replyLanguage: lang.code });
+            Object.assign(r, { reply: text });
+          }
           break;
         }
         default:
