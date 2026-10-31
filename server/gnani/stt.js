@@ -58,10 +58,13 @@ export async function transcribeClip(buffer, { filename = 'clip.wav', mime = 'au
  */
 export function openRealtime({ languages, keyterms = [], topic, onEvent }) {
   usage.ensure('stt_seconds', 5);
+  // The realtime endpoint takes exactly one locale in language_code; extra locales go in multi_lang_codes.
+  const locales = (languages || config.stt.languages).split(',').map((s) => s.trim()).filter(Boolean);
   const headers = {
     'x-api-key-id': config.gnani.apiKey,
     model: config.stt.model,
-    language_code: languages || config.stt.languages,
+    language_code: locales[0],
+    ...(locales.length > 1 ? { multi_lang_codes: locales.join(',') } : {}),
     format: config.stt.format,
     'x-sample-rate': '16000',
     'x-idle-timeout-sec': '30',
@@ -140,10 +143,11 @@ export function openRealtime({ languages, keyterms = [], topic, onEvent }) {
 export async function transcribeBatch(buffer, { filename, mime = 'audio/wav', languages, keyterms = [], topic, onStatus = () => {} }) {
   const seconds = estimateDuration(buffer, mime);
   usage.ensure('stt_seconds', seconds);
-  const langs = (languages || config.stt.languages).split(',').map((s) => s.trim()).filter(Boolean);
+  // Verified against the live API: language_code is a comma-separated string, boost words go in
+  // "keywords", and context is either topic(+keywords) or speaker_names, not both.
   const jobConfig = {
     model: config.stt.model,
-    language_code: langs.length === 1 ? langs[0] : langs,
+    language_code: (languages || config.stt.languages).replace(/\s+/g, ''),
     mode: 'transcribe',
     with_diarization: true,
     num_speakers: 2,
@@ -151,22 +155,31 @@ export async function transcribeBatch(buffer, { filename, mime = 'audio/wav', la
   };
   if (config.stt.model === 'prisma-v3.0') {
     jobConfig.format = 'codemix';
-    if (keyterms.length) jobConfig.keyterms = keyterms.slice(0, 200);
     if (topic && topic.length >= 30) jobConfig.topic = topic.slice(0, 1600);
-    jobConfig.speaker_names = ['Dukandaar', 'Grahak'];
+    if (keyterms.length) jobConfig.keywords = keyterms.slice(0, 200);
   }
 
+  // The config part must be a plain form field; a Blob would be sent as a file and the API returns 500.
   const form = new FormData();
-  form.append('config', new Blob([JSON.stringify(jobConfig)], { type: 'application/json' }));
+  form.append('config', JSON.stringify(jobConfig));
   form.append('files', new Blob([buffer], { type: mime }), filename);
 
   const base = `${config.gnani.http}/stt/v3/batch/jobs`;
-  let res = await fetch(base, { method: 'POST', headers: auth(), body: form });
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  // Batch endpoints are rate limited; back off on 429 instead of failing the whole job.
+  const call = async (url, opts = {}) => {
+    for (let attempt = 0; ; attempt++) {
+      const r = await fetch(url, { ...opts, headers: auth() });
+      if (r.status !== 429 || attempt >= 8) return r;
+      await sleep(Math.min(60000, 5000 * 2 ** attempt));
+    }
+  };
+  let res = await call(base, { method: 'POST', body: form });
   if (!res.ok) throw await gnaniError(res);
   const { job_id: jobId } = await res.json();
   onStatus({ jobId, status: 'CREATED' });
 
-  res = await fetch(`${base}/${jobId}/start`, { method: 'POST', headers: auth() });
+  res = await call(`${base}/${jobId}/start`, { method: 'POST' });
   if (!res.ok) throw await gnaniError(res);
   onStatus({ jobId, status: 'STARTING' });
 
@@ -174,8 +187,8 @@ export async function transcribeBatch(buffer, { filename, mime = 'audio/wav', la
   let job;
   const deadline = Date.now() + 15 * 60 * 1000;
   do {
-    await new Promise((r) => setTimeout(r, 10000));
-    res = await fetch(`${base}/${jobId}`, { headers: auth() });
+    await sleep(15000);
+    res = await call(`${base}/${jobId}`);
     if (!res.ok) throw await gnaniError(res);
     job = await res.json();
     onStatus({ jobId, status: job.status, percent: job.percent });
@@ -185,7 +198,7 @@ export async function transcribeBatch(buffer, { filename, mime = 'audio/wav', la
     throw new Error(`Batch job ${jobId} ended with status ${job.status}`);
   }
 
-  res = await fetch(`${base}/${jobId}/files`, { headers: auth() });
+  res = await call(`${base}/${jobId}/files`);
   if (!res.ok) throw await gnaniError(res);
   const listing = await res.json();
   const files = listing.files || listing.data || listing.items || (Array.isArray(listing) ? listing : []);

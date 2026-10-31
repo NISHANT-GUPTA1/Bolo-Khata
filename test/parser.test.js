@@ -43,3 +43,9 @@ test('two actions in one sentence', () => {
 test('quantities are not mistaken for money', () => {
   assert.equal(one('Abdul ko 5 kilo atta, 200 rupaye').amount, 200);
 });
+
+test('phone call: "aaya hoon" and "de doonga" do not turn udhaar into a payment', () => {
+  const a = one('मैं विकास बोल रहा हूँ, नए फ्लैट में आया हूँ, दस किलो chawal, सात सौ अस्सी रुपये होंगे, अभी udhaar में रख लीजिए, शाम को आकर दे दूँगा');
+  assert.equal(a.intent, 'credit');
+  assert.equal(a.amount, 780);
+});

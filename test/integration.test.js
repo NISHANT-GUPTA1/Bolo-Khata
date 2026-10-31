@@ -82,6 +82,8 @@ test('live voice loop: Prisma WS (1,024-byte frames) -> parser -> Timbre WS audi
   assert.ok(mock.log.frames.length >= 5);
   assert.equal(mock.log.headers.stream.model, 'prisma-v3.0');
   assert.equal(mock.log.headers.stream['x-sample-rate'], '16000');
+  assert.equal(mock.log.headers.stream.language_code, 'hi-IN');
+  assert.equal(mock.log.headers.stream.multi_lang_codes, 'hi-IN,en-IN');
   assert.equal(mock.log.lastWsTts.audio_config.container, 'raw');
 });
 
@@ -126,7 +128,7 @@ test('phone order via Prisma Batch (denoise + diarization) -> approve', async ()
   fd.append('audio', new Blob([pcmToWav(pcm(3000), 8000)], { type: 'audio/wav' }), 'call.wav');
   const { id } = await (await fetch(`${BASE}/api/calls`, { method: 'POST', body: fd })).json();
   let call;
-  for (let i = 0; i < 30; i++) {
+  for (let i = 0; i < 60; i++) {
     await new Promise((r) => setTimeout(r, 1000));
     call = (await (await fetch(`${BASE}/api/calls`)).json()).find((c) => c.id === id);
     if (['READY', 'FAILED'].includes(call.status)) break;

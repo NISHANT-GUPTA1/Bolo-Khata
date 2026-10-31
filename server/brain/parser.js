@@ -38,11 +38,13 @@ const KW = {
   dues: ['sabse', 'zyada', 'jyada', 'kiskis', 'kaunkaun', 'list', 'saare', 'sabka'],
   balance: ['kitna', 'kitne', 'kitni', 'balance', 'hisaab', 'hisab', 'batao', 'bata'],
   payment: ['jama', 'jamaa', 'chuka', 'chukaya', 'chukaaye', 'wapas', 'vapas', 'paid', 'payment', 'bhar', 'bhara', 'bhare',
-    'mila', 'mile', 'received', 'aaye', 'aaya', 'diye', 'degaye', 'degayi', 'degaya', 'degya', 'dediye', 'upi', 'phonepe', 'gpay', 'paytm'],
+    'mila', 'mile', 'received', 'diye', 'degaye', 'degayi', 'degaya', 'degya', 'dediye', 'upi', 'phonepe', 'gpay', 'paytm'],
   credit: ['udhaar', 'udhar', 'udhari', 'likh', 'likho', 'likhdo', 'likhna', 'likhlo', 'credit', 'khate', 'khaate', 'khata',
     'legaye', 'legayi', 'legaya', 'legya', 'liya', 'liye', 'saman', 'samaan', 'baki', 'baaki', 'chadha', 'chadhao', 'jodo', 'daalo', 'dalo'],
   addCustomer: ['nayagrahak', 'naya', 'newcustomer', 'grahak'],
 };
+const STRONG_PAY = setOf(['jama', 'jamaa', 'chuka', 'chukaya', 'wapas', 'vapas', 'paid', 'payment', 'upi', 'phonepe', 'gpay', 'paytm', 'received']);
+const UDHAAR = setOf(['udhaar', 'udhar', 'udhari', 'likh', 'likho', 'likhdo', 'credit']);
 const KW_SK = Object.fromEntries(Object.entries(KW).map(([k, v]) => [k, new Set(v.map(skeleton))]));
 
 const STOP = new Set(['ko', 'ne', 'ka', 'ki', 'ke', 'se', 'ji', 'bhai', 'bhaiya', 'bhaiyya', 'didi', 'aunty', 'uncle', 'sahab', 'saab',
@@ -209,7 +211,9 @@ function parseOne(text, customers, carry = {}) {
   if (has(sks, KW_SK.remind) && customer) return { intent: 'remind', customer };
   if (has(sks, KW_SK.addCustomer) && customer && !amount) return { intent: 'add_customer', customer, isNewCustomer: !match };
   if (amount) {
-    if (has(sks, KW_SK.payment) || neBeforeGive) return { intent: 'payment', ...base };
+    const strongPay = has(sks, STRONG_PAY);
+    const saysUdhaar = has(sks, UDHAAR);
+    if (strongPay || ((has(sks, KW_SK.payment) || neBeforeGive) && !saysUdhaar)) return { intent: 'payment', ...base };
     if (has(sks, KW_SK.credit) || items.length || customer) return { intent: 'credit', ...base };
   }
   if (!amount && customer && has(sks, KW_SK.balance) && !isNew) return { intent: 'balance', customer };

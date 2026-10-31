@@ -43,7 +43,7 @@ Most kirana shops still run credit on a paper notebook (*bahi-khata*). Entries g
 |---|---|
 | **Prisma v3.0 STT: Realtime WebSocket** | Live mic → captions while speaking. `codemix` format, `hi-IN,en-IN` (or Kannada/Tamil/Bengali), customer names and grocery terms boosted with `keyterms`, shop-context `topic`. Audio streamed as 16 kHz PCM in exact 1,024-byte frames. |
 | **Prisma v3.0 STT: REST** | Uploaded WhatsApp-style voice notes (≤30 s). |
-| **Prisma v3.0 STT: Batch** | Phone-order recordings with **`with_denoise`** and **`with_diarization`** (shopkeeper vs customer), on 8 kHz noisy telephone audio. |
+| **Prisma v3.0 STT: Batch** | Phone-order recordings with **`with_denoise`** and **`with_diarization`** (shopkeeper vs customer), on 8 kHz noisy telephone audio, with a shop `topic` and boosted `keywords`. |
 | **Timbre v2.5 TTS: WebSocket** | Lowest-latency spoken confirmations in the live voice loop (Hinglish voice *Poorvi*, `hi-en`; Saanvi for Kannada, Vedika for Tamil, Kirra for Bengali). |
 | **Timbre v2.5 TTS: SSE** | Streamed daily summaries and answers; playback starts on the first chunk. |
 | **Timbre v3.0 TTS: REST** | Customer reminders in any of 10 Indian languages with one voice. |
